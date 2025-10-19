@@ -19,6 +19,7 @@ import { SkeletonCard } from "@/components/SkeletonCard";
 import { EmptyState } from "@/components/EmptyState";
 import { useRecipes, useToggleFavorite } from "@/lib/useRecipes";
 import { useAuth } from "@/contexts/AuthContext";
+import { SignInModal } from "@/components/SignInModal";
 import { useDebounce } from "@/hooks/useDebounce";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { useRef } from "react";
@@ -184,6 +185,10 @@ function MainApp() {
             // Open the profile tab when avatar is clicked instead of signing out
             onProfileClick={() => setActiveTab('profile')}
           />
+
+          {!user && (
+            <SignInModal open={!user} onClose={() => { /* noop - will close when user signs in */ }} />
+          )}
           
           <main className="flex-1 overflow-auto">
             <div className="max-w-7xl mx-auto px-8 md:px-12 py-12 space-y-16">
