@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1" />
+    <meta name="description" content="Create and share delicious Ninja Creami recipes with the community. Discover ice cream, sorbet, and frozen treat recipes." />
+    <meta name="theme-color" content="#3b82f6" />
+    <title>Ninja Creami Recipe Book</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Playfair+Display:wght@600;700;800&display=swap" rel="stylesheet">
+  </head>
+  <body>
+    <div id="root"></div>
+    <script>
+      // CRITICAL: Unregister service worker immediately
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.getRegistrations().then(regs => {
+          regs.forEach(reg => {
+            console.log('Unregistering service worker:', reg);
+            reg.unregister();
+          });
+        });
+        // Also clear all caches
+        if ('caches' in window) {
+          caches.keys().then(keys => {
+            keys.forEach(key => {
+              console.log('Deleting cache:', key);
+              caches.delete(key);
+            });
+          });
+        }
+      }
+      console.log("INDEX.HTML v8 - COMPLETE CACHE CLEAR");
+    </script>
+    <script type="module" src="/src/main.tsx?v=8"></script>
+  </body>
+</html>
