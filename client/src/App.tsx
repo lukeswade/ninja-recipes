@@ -181,7 +181,8 @@ function MainApp() {
         <div className="flex flex-col flex-1 min-h-screen bg-background pb-20 md:pb-0">
           <Header 
             onAddRecipe={() => setAddRecipeOpen(true)}
-            onProfileClick={signOut}
+            // Open the profile tab when avatar is clicked instead of signing out
+            onProfileClick={() => setActiveTab('profile')}
           />
           
           <main className="flex-1 overflow-auto">
