@@ -1,4 +1,4 @@
-name: Hello World Test
+name: Deploy to Firebase Functions
 
 on:
   push:
@@ -7,7 +7,34 @@ on:
   workflow_dispatch:
 
 jobs:
-  build:
+  deploy:
     runs-on: ubuntu-latest
     steps:
-      - run: echo "Hello, world!"
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install root dependencies
+        run: npm ci
+
+      - name: Build client and functions
+        run: npm run build
+
+      - name: Authenticate with Google Cloud
+        uses: 'google-github-actions/auth@v2'
+        with:
+          credentials_json: '${{ secrets.FIREBASE_SERVICE_ACCOUNT }}'
+
+      - name: Install Firebase CLI
+        run: npm install -g firebase-tools
+
+      - name: Install functions dependencies
+        run: cd functions && npm ci
+
+      - name: Deploy to Firebase Functions
+        run: firebase deploy --only functions:api --project studio-4344422468-c2966 --force
