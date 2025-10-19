@@ -3,6 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { ThemeToggle } from "./ThemeToggle";
 import { SidebarTrigger } from "@/components/ui/sidebar";
+import { useAuth } from "@/contexts/AuthContext";
 
 interface HeaderProps {
   onAddRecipe?: () => void;
@@ -10,6 +11,19 @@ interface HeaderProps {
 }
 
 export function Header({ onAddRecipe, onProfileClick }: HeaderProps) {
+  const { user } = useAuth();
+
+  const getInitials = (name?: string | null, email?: string) => {
+    if (name) {
+      const parts = name.split(' ').filter(Boolean);
+      return parts.slice(0, 2).map(p => p[0].toUpperCase()).join('');
+    }
+    if (email) return email[0].toUpperCase();
+    return 'U';
+  };
+
+  const initials = getInitials(user?.displayName, user?.email);
+
   return (
     <header className="sticky top-0 z-50 w-full border-b border-border/50 bg-background/95 backdrop-blur-xl">
       <div className="flex h-20 items-center justify-between px-6 md:px-8 gap-4">
@@ -32,13 +46,13 @@ export function Header({ onAddRecipe, onProfileClick }: HeaderProps) {
             Add Recipe
           </Button>
           <ThemeToggle />
-          <Avatar 
-            className="h-10 w-10 cursor-pointer hover-elevate border-2 border-border" 
+          <Avatar
+            className="h-10 w-10 cursor-pointer hover-elevate border-2 border-border"
             onClick={onProfileClick}
             data-testid="button-profile"
           >
-            <AvatarImage src="" />
-            <AvatarFallback className="text-xs font-medium">U</AvatarFallback>
+            <AvatarImage src={user?.photoURL || ''} />
+            <AvatarFallback className="text-xs font-medium">{initials}</AvatarFallback>
           </Avatar>
         </div>
       </div>
