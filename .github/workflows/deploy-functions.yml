@@ -150,7 +150,8 @@ jobs:
       - name: Deploy to Firebase Functions
         run: |
           if [ -d functions ]; then
-            firebase deploy --only functions:api --project studio-4344422468-c2966 --force
+            # Deploy to the creamininja project (user requested)
+            firebase deploy --only functions:api --project creamininja --force
           else
             echo "No functions directory found — skipping firebase functions deploy"
           fi
