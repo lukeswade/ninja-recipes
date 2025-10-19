@@ -1,0 +1,35 @@
+name: List Cloudflare Pages projects
+
+on:
+  workflow_dispatch:
+
+jobs:
+  list-pages:
+    name: List Pages projects & environments
+    runs-on: ubuntu-latest
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Show Cloudflare Pages projects
+        run: |
+          set -euo pipefail
+          echo "Listing Pages projects for account: ${CLOUDFLARE_ACCOUNT_ID}"
+          curl -sS -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/pages/projects" | jq .
+
+      - name: Show variables for likely project names
+        run: |
+          set -euo pipefail
+          echo "Attempting to inspect a few common slugs (repo name and ninja-recipes)"
+          for slug in "ninja-recipes" "ninja_recipes" "ninja-recipes-pages"; do
+            echo "\n--- slug: ${slug} ---"
+            curl -sS -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+              "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/pages/projects/${slug}" | jq . || true
+            echo "env vars for ${slug}:"
+            curl -sS -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+              "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/pages/projects/${slug}/environments/production/variables" | jq . || true
+          done
