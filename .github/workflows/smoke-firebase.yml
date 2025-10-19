@@ -1,0 +1,36 @@
+name: Smoke — Firebase project check
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+
+jobs:
+  smoke:
+    name: Smoke test Firebase project
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Authenticate with Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: '${{ secrets.FIREBASE_SERVICE_ACCOUNT }}'
+
+      - name: Show public Firebase project/app info
+        env:
+          PROJECT_ID: ${{ secrets.VITE_FIREBASE_PROJECT_ID }}
+        run: |
+          set -euo pipefail
+          echo "Using project: ${PROJECT_ID}"
+          ACCESS_TOKEN=$(gcloud auth print-access-token)
+
+          echo "\n==> Firebase Management API: project" 
+          curl -sS -H "Authorization: Bearer $ACCESS_TOKEN" "https://firebase.googleapis.com/v1beta1/projects/${PROJECT_ID}" | jq . || true
+
+          echo "\n==> Firebase Management API: webApps" 
+          curl -sS -H "Authorization: Bearer $ACCESS_TOKEN" "https://firebase.googleapis.com/v1beta1/projects/${PROJECT_ID}/webApps" | jq . || true
+
+          echo "\n==> adminSdkConfig" 
+          curl -sS -H "Authorization: Bearer $ACCESS_TOKEN" "https://firebase.googleapis.com/v1beta1/projects/${PROJECT_ID}/adminSdkConfig" | jq . || true
