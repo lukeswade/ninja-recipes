@@ -328,38 +328,61 @@ function MainApp() {
           {activeTab === 'profile' && (
             <div>
               <h2 className="font-serif text-2xl font-bold mb-6">Profile & Settings</h2>
-              <div className="max-w-2xl space-y-6">
-                <div className="p-6 border rounded-lg space-y-4">
-                  <h3 className="text-lg font-semibold">Account Information</h3>
-                  <div className="space-y-2">
-                    <div>
-                      <p className="text-sm text-muted-foreground">Email</p>
-                      <p className="font-medium">{user?.email || 'dev@example.com'}</p>
-                    </div>
-                    <div>
-                      <p className="text-sm text-muted-foreground">Display Name</p>
-                      <p className="font-medium">{user?.displayName || 'Dev User'}</p>
-                    </div>
-                    <div>
-                      <p className="text-sm text-muted-foreground">User ID</p>
-                      <p className="font-mono text-sm">{user?.id || 'dev-user-123'}</p>
+              {user ? (
+                <div className="max-w-2xl space-y-6">
+                  <div className="p-6 border rounded-lg space-y-4">
+                    <h3 className="text-lg font-semibold">Account Information</h3>
+                    <div className="space-y-2">
+                      <div>
+                        <p className="text-sm text-muted-foreground">Email</p>
+                        <p className="font-medium">{user.email}</p>
+                      </div>
+                      <div>
+                        <p className="text-sm text-muted-foreground">Display Name</p>
+                        <p className="font-medium">{user.displayName || '—'}</p>
+                      </div>
+                      <div>
+                        <p className="text-sm text-muted-foreground">User ID</p>
+                        <p className="font-mono text-sm">{user.id}</p>
+                      </div>
                     </div>
                   </div>
-                </div>
 
-                <div className="p-6 border rounded-lg space-y-4">
-                  <h3 className="text-lg font-semibold">Settings</h3>
-                  <div className="space-y-3">
-                    <button
-                      onClick={signOut}
-                      className="px-4 py-2 bg-destructive text-destructive-foreground rounded-md hover:bg-destructive/90 transition-colors"
-                      data-testid="button-sign-out"
-                    >
-                      Sign Out
-                    </button>
+                  <div className="p-6 border rounded-lg space-y-4">
+                    <h3 className="text-lg font-semibold">Settings</h3>
+                    <div className="space-y-3">
+                      <button
+                        onClick={signOut}
+                        className="px-4 py-2 bg-destructive text-destructive-foreground rounded-md hover:bg-destructive/90 transition-colors"
+                        data-testid="button-sign-out"
+                      >
+                        Sign Out
+                      </button>
+                    </div>
                   </div>
                 </div>
-              </div>
+              ) : (
+                <div className="max-w-2xl space-y-6">
+                  <div className="p-6 border rounded-lg text-center">
+                    <h3 className="text-lg font-semibold mb-2">You're not signed in</h3>
+                    <p className="text-sm text-muted-foreground mb-4">Create an account or sign in to access profile and save recipes.</p>
+                    <div className="flex items-center justify-center gap-3">
+                      <button
+                        onClick={() => {/* SignInModal opens automatically when user is null */}}
+                        className="px-4 py-2 bg-primary text-primary-foreground rounded-md"
+                      >
+                        Sign In
+                      </button>
+                      <button
+                        onClick={() => {/* Could open a sign-up flow in future */}}
+                        className="px-4 py-2 border rounded-md"
+                      >
+                        Create account
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>
