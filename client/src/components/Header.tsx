@@ -1,6 +1,12 @@
 import { Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+} from "@/components/ui/dropdown-menu";
 import { ThemeToggle } from "./ThemeToggle";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { useAuth } from "@/contexts/AuthContext";
@@ -11,7 +17,7 @@ interface HeaderProps {
 }
 
 export function Header({ onAddRecipe, onProfileClick }: HeaderProps) {
-  const { user } = useAuth();
+  const { user, signOut } = useAuth();
 
   const getInitials = (name?: string | null, email?: string) => {
     if (name) {
@@ -46,14 +52,26 @@ export function Header({ onAddRecipe, onProfileClick }: HeaderProps) {
             Add Recipe
           </Button>
           <ThemeToggle />
-          <Avatar
-            className="h-10 w-10 cursor-pointer hover-elevate border-2 border-border"
-            onClick={onProfileClick}
-            data-testid="button-profile"
-          >
-            <AvatarImage src={user?.photoURL || ''} />
-            <AvatarFallback className="text-xs font-medium">{initials}</AvatarFallback>
-          </Avatar>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Avatar
+                className="h-10 w-10 cursor-pointer hover-elevate border-2 border-border"
+                data-testid="button-profile"
+              >
+                <AvatarImage src={user?.photoURL || ''} />
+                <AvatarFallback className="text-xs font-medium">{initials}</AvatarFallback>
+              </Avatar>
+            </DropdownMenuTrigger>
+
+            <DropdownMenuContent>
+              <DropdownMenuItem onSelect={() => { onProfileClick?.(); }}>
+                Profile
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => { signOut(); }}>
+                Sign Out
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </div>
     </header>
