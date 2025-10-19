@@ -4,6 +4,7 @@ import connectPgSimple from "connect-pg-simple";
 import { neon } from "@neondatabase/serverless";
 import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
+import { verifyFirebaseToken } from './middleware/verifyFirebaseToken';
 
 const app = express();
 app.use(express.json());
@@ -30,6 +31,9 @@ app.use(
     },
   })
 );
+
+// Accept Firebase ID tokens in Authorization header and populate session when present
+app.use(verifyFirebaseToken as any);
 
 app.use((req, res, next) => {
   const start = Date.now();

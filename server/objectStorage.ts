@@ -9,25 +9,44 @@ import {
   setObjectAclPolicy,
 } from "./objectAcl";
 
-const REPLIT_SIDECAR_ENDPOINT = "http://127.0.0.1:1106";
+// Fallback logger (uses console) in case ./utils isn't present.
+// This provides the minimal interface used by this file (info, error, warn, debug).
+const logger = {
+  info: (...args: unknown[]) => console.info(...args),
+  error: (...args: unknown[]) => console.error(...args),
+  warn: (...args: unknown[]) => console.warn(...args),
+  debug: (...args: unknown[]) => (console.debug ? console.debug(...args) : console.log(...args)),
+};
 
-export const objectStorageClient = new Storage({
-  credentials: {
-    audience: "replit",
-    subject_token_type: "access_token",
-    token_url: `${REPLIT_SIDECAR_ENDPOINT}/token`,
-    type: "external_account",
-    credential_source: {
-      url: `${REPLIT_SIDECAR_ENDPOINT}/credential`,
-      format: {
-        type: "json",
-        subject_token_field_name: "access_token",
-      },
-    },
-    universe_domain: "googleapis.com",
-  },
-  projectId: "",
-});
+const DEFAULT_BUCKET = process.env.GCLOUD_STORAGE_BUCKET ?? 'ninja-recipes';
+
+let storage: Storage | null = null;
+
+export function getStorage() {
+  if (storage) return storage;
+
+  // If a FIREBASE_SERVICE_ACCOUNT is provided (CI / production), prefer explicit credentials
+  const svcJson = process.env.FIREBASE_SERVICE_ACCOUNT;
+  if (svcJson) {
+    try {
+      const svc = JSON.parse(svcJson);
+      storage = new Storage({ projectId: svc.project_id, credentials: svc });
+      logger.info('Initialized Google Cloud Storage with service account credentials');
+      return storage;
+    } catch (err) {
+      logger.error('Failed to parse FIREBASE_SERVICE_ACCOUNT, falling back to default client', err);
+    }
+  }
+
+  // Default: let the client pick up credentials from environment (GCE, service account via ADC, etc)
+  storage = new Storage();
+  logger.info('Using default Google Cloud Storage client');
+  return storage;
+}
+
+export function getBucketName() {
+  return DEFAULT_BUCKET;
+}
 
 export class ObjectNotFoundError extends Error {
   constructor() {
@@ -73,8 +92,8 @@ export class ObjectStorageService {
   async searchPublicObject(filePath: string): Promise<File | null> {
     for (const searchPath of this.getPublicObjectSearchPaths()) {
       const fullPath = `${searchPath}/${filePath}`;
-      const { bucketName, objectName } = parseObjectPath(fullPath);
-      const bucket = objectStorageClient.bucket(bucketName);
+        const { bucketName, objectName } = parseObjectPath(fullPath);
+        const bucket = getStorage().bucket(bucketName);
       const file = bucket.file(objectName);
       const [exists] = await file.exists();
       if (exists) {
@@ -138,7 +157,7 @@ export class ObjectStorageService {
     }
     const objectEntityPath = `${entityDir}${entityId}`;
     const { bucketName, objectName } = parseObjectPath(objectEntityPath);
-    const bucket = objectStorageClient.bucket(bucketName);
+        const bucket = getStorage().bucket(bucketName);
     const objectFile = bucket.file(objectName);
     const [exists] = await objectFile.exists();
     if (!exists) {
@@ -227,28 +246,27 @@ async function signObjectURL({
   method: "GET" | "PUT" | "DELETE" | "HEAD";
   ttlSec: number;
 }): Promise<string> {
-  const request = {
-    bucket_name: bucketName,
-    object_name: objectName,
-    method,
-    expires_at: new Date(Date.now() + ttlSec * 1000).toISOString(),
-  };
-  const response = await fetch(
-    `${REPLIT_SIDECAR_ENDPOINT}/object-storage/signed-object-url`,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(request),
+  // If we have an explicit service account, use GCS signed URLs (v4)
+  const svcJson = process.env.FIREBASE_SERVICE_ACCOUNT;
+  if (svcJson) {
+    try {
+      const storage = getStorage();
+      const bucket = storage.bucket(bucketName);
+      const file = bucket.file(objectName);
+      const action = method === 'GET' ? 'read' : method === 'PUT' ? 'write' : 'delete';
+      const [url] = await file.getSignedUrl({
+        version: 'v4',
+        action: action as any,
+        expires: Date.now() + ttlSec * 1000,
+      });
+      return url;
+    } catch (err) {
+      logger.error('Failed to generate GCS signed URL, falling back to sidecar', err);
     }
-  );
-  if (!response.ok) {
-    throw new Error(
-      `Failed to sign object URL, errorcode: ${response.status}, ` +
-        `make sure you're running on Replit`
-    );
   }
-  const { signed_url: signedURL } = await response.json();
-  return signedURL;
+
+  // If we couldn't generate a signed URL via the GCS client, fail fast.
+  throw new Error(
+    'FIREBASE_SERVICE_ACCOUNT not set or signing failed. Set FIREBASE_SERVICE_ACCOUNT to a service account JSON to enable GCS signed URLs.'
+  );
 }
