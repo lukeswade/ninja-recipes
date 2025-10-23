@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import express, { type Request, Response, NextFunction } from "express";
 import session from "express-session";
 import connectPgSimple from "connect-pg-simple";
@@ -10,25 +11,13 @@ const app = express();
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 
-// Set up PostgreSQL session store
-const PgSession = connectPgSimple(session);
-const sql = neon(process.env.DATABASE_URL!);
-
+// Set up session store
 app.use(
   session({
-    store: new PgSession({
-      conString: process.env.DATABASE_URL!,
-      createTableIfMissing: true,
-    }),
-    secret: process.env.SESSION_SECRET || 'dev-secret-change-in-production',
+    secret: 'your-secret-key', // Change this to a secure secret
     resave: false,
     saveUninitialized: false,
-    cookie: {
-      maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
-    },
+    cookie: { secure: false }, // Set to true in production with HTTPS
   })
 );
 
@@ -128,7 +117,7 @@ app.get('/clear-cache', (_req, res) => {
   // ALWAYS serve the app on the port specified in the environment variable PORT
   // Cloud Run and other deployment platforms provide PORT dynamically
   // Default to 5000 for local development only
-  const port = parseInt(process.env.PORT || '5000', 10);
+  const port = parseInt(process.env.PORT || '5001', 10);
   server.listen(port, "0.0.0.0", () => {
     log(`serving on port ${port}`);
   });

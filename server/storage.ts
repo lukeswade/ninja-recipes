@@ -7,8 +7,6 @@ import {
   type RecipePhoto, type InsertRecipePhoto
 } from "@shared/schema";
 import { db } from "./db";
-import { users, recipes, ingredients, favorites, sharedRecipes, recipePhotos } from "@shared/schema";
-import { eq, and, desc, sql as drizzleSql } from "drizzle-orm";
 
 export interface IStorage {
   // Users
@@ -45,55 +43,54 @@ export interface IStorage {
   deleteRecipePhoto(id: string): Promise<void>;
 }
 
-export class DrizzleStorage implements IStorage {
+export class FirestoreStorage implements IStorage {
   // Users
   async getUser(id: string): Promise<User | undefined> {
-    const [user] = await db.select().from(users).where(eq(users.id, id));
-    return user;
+    const doc = await db.collection('users').doc(id).get();
+    if (!doc.exists) return undefined;
+    return { id: doc.id, ...doc.data() } as User;
   }
 
   async getUserByEmail(email: string): Promise<User | undefined> {
-    const [user] = await db.select().from(users).where(eq(users.email, email));
-    return user;
+    const snapshot = await db.collection('users').where('email', '==', email).get();
+    if (snapshot.empty) return undefined;
+    const doc = snapshot.docs[0];
+    return { id: doc.id, ...doc.data() } as User;
   }
 
   async createUser(user: InsertUser): Promise<User> {
-    const [newUser] = await db.insert(users).values(user).returning();
-    return newUser;
+    const id = crypto.randomUUID();
+    await db.collection('users').doc(id).set(user);
+    return { id, ...user } as User;
   }
 
   // Recipes
   async getRecipe(id: string, userId?: string): Promise<RecipeWithDetails | undefined> {
-    const [recipe] = await db.select().from(recipes).where(eq(recipes.id, id));
-    if (!recipe) return undefined;
+    const recipeDoc = await db.collection('recipes').doc(id).get();
+    if (!recipeDoc.exists) return undefined;
+    const recipe = { id: recipeDoc.id, ...recipeDoc.data() } as Recipe;
 
-    const recipeIngredients = await db
-      .select()
-      .from(ingredients)
-      .where(eq(ingredients.recipeId, id))
-      .orderBy(ingredients.order);
+    const ingredientsSnapshot = await db.collection('ingredients').where('recipeId', '==', id).orderBy('order').get();
+    const ingredients = ingredientsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as Ingredient[];
 
-    const recipePhotosData = await db
-      .select()
-      .from(recipePhotos)
-      .where(eq(recipePhotos.recipeId, id));
+    const photosSnapshot = await db.collection('recipePhotos').where('recipeId', '==', id).get();
+    const photos = photosSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as RecipePhoto[];
 
-    const [author] = await db.select().from(users).where(eq(users.id, recipe.userId));
+    const authorDoc = await db.collection('users').doc(recipe.userId).get();
+    const author = authorDoc.exists ? { id: authorDoc.id, displayName: authorDoc.data()?.displayName, photoURL: authorDoc.data()?.photoURL } : undefined;
+
     const favoriteCount = await this.getFavoriteCount(id);
 
     let isFavorited = false;
     if (userId) {
-      const [fav] = await db
-        .select()
-        .from(favorites)
-        .where(and(eq(favorites.userId, userId), eq(favorites.recipeId, id)));
-      isFavorited = !!fav;
+      const favoriteSnapshot = await db.collection('favorites').where('userId', '==', userId).where('recipeId', '==', id).get();
+      isFavorited = !favoriteSnapshot.empty;
     }
 
     return {
       ...recipe,
-      ingredients: recipeIngredients,
-      photos: recipePhotosData,
+      ingredients,
+      photos,
       author: author!,
       favoriteCount,
       isFavorited,
@@ -101,142 +98,113 @@ export class DrizzleStorage implements IStorage {
   }
 
   async getRecipesByUser(userId: string): Promise<RecipeWithDetails[]> {
-    const userRecipes = await db
-      .select()
-      .from(recipes)
-      .where(eq(recipes.userId, userId))
-      .orderBy(desc(recipes.createdAt));
-
-    const results = await Promise.all(
-      userRecipes.map(r => this.getRecipe(r.id, userId))
-    );
+    const snapshot = await db.collection('recipes').where('userId', '==', userId).orderBy('createdAt', 'desc').get();
+    const recipeIds = snapshot.docs.map(doc => doc.id);
+    const results = await Promise.all(recipeIds.map(id => this.getRecipe(id, userId)));
     return results.filter((r): r is RecipeWithDetails => r !== undefined);
   }
 
   async getPublicRecipes(userId?: string): Promise<RecipeWithDetails[]> {
-    const publicRecipes = await db
-      .select()
-      .from(recipes)
-      .where(eq(recipes.isPrivate, false))
-      .orderBy(desc(recipes.createdAt));
-
-    const results = await Promise.all(
-      publicRecipes.map(r => this.getRecipe(r.id, userId))
-    );
+    const snapshot = await db.collection('recipes').where('isPrivate', '==', false).orderBy('createdAt', 'desc').get();
+    const recipeIds = snapshot.docs.map(doc => doc.id);
+    const results = await Promise.all(recipeIds.map(id => this.getRecipe(id, userId)));
     return results.filter((r): r is RecipeWithDetails => r !== undefined);
   }
 
   async getFavoritedRecipes(userId: string): Promise<RecipeWithDetails[]> {
-    const favs = await db
-      .select({ recipeId: favorites.recipeId })
-      .from(favorites)
-      .where(eq(favorites.userId, userId));
-
-    const results = await Promise.all(
-      favs.map(f => this.getRecipe(f.recipeId, userId))
-    );
+    const snapshot = await db.collection('favorites').where('userId', '==', userId).get();
+    const recipeIds = snapshot.docs.map(doc => doc.data().recipeId);
+    const results = await Promise.all(recipeIds.map(id => this.getRecipe(id, userId)));
     return results.filter((r): r is RecipeWithDetails => r !== undefined);
   }
 
   async getSharedRecipes(email: string): Promise<RecipeWithDetails[]> {
-    const shared = await db
-      .select({ recipeId: sharedRecipes.recipeId })
-      .from(sharedRecipes)
-      .where(eq(sharedRecipes.sharedWithEmail, email));
-
-    const results = await Promise.all(
-      shared.map(s => this.getRecipe(s.recipeId))
-    );
+    const snapshot = await db.collection('sharedRecipes').where('sharedWithEmail', '==', email).get();
+    const recipeIds = snapshot.docs.map(doc => doc.data().recipeId);
+    const results = await Promise.all(recipeIds.map(id => this.getRecipe(id)));
     return results.filter((r): r is RecipeWithDetails => r !== undefined);
   }
 
   async createRecipe(recipe: InsertRecipe): Promise<Recipe> {
-    const [newRecipe] = await db.insert(recipes).values(recipe).returning();
-    return newRecipe;
+    const id = crypto.randomUUID();
+    await db.collection('recipes').doc(id).set(recipe);
+    return { id, ...recipe } as Recipe;
   }
 
   async updateRecipe(id: string, recipe: Partial<InsertRecipe>): Promise<Recipe> {
-    const [updated] = await db
-      .update(recipes)
-      .set({ ...recipe, updatedAt: new Date() })
-      .where(eq(recipes.id, id))
-      .returning();
-    return updated;
+    await db.collection('recipes').doc(id).update({ ...recipe, updatedAt: new Date() });
+    const doc = await db.collection('recipes').doc(id).get();
+    return { id: doc.id, ...doc.data() } as Recipe;
   }
 
   async updateRecipeImage(id: string, imageUrl: string): Promise<void> {
-    await db
-      .update(recipes)
-      .set({ imageUrl, updatedAt: new Date() })
-      .where(eq(recipes.id, id));
+    await db.collection('recipes').doc(id).update({ imageUrl, updatedAt: new Date() });
   }
 
   async deleteRecipe(id: string): Promise<void> {
-    await db.delete(recipes).where(eq(recipes.id, id));
+    await db.collection('recipes').doc(id).delete();
   }
 
   // Ingredients
   async createIngredient(ingredient: InsertIngredient): Promise<Ingredient> {
-    const [newIngredient] = await db.insert(ingredients).values(ingredient).returning();
-    return newIngredient;
+    const id = crypto.randomUUID();
+    await db.collection('ingredients').doc(id).set(ingredient);
+    return { id, ...ingredient } as Ingredient;
   }
 
   async updateIngredient(id: string, ingredient: Partial<InsertIngredient>): Promise<Ingredient> {
-    const [updated] = await db
-      .update(ingredients)
-      .set(ingredient)
-      .where(eq(ingredients.id, id))
-      .returning();
-    return updated;
+    await db.collection('ingredients').doc(id).update(ingredient);
+    const doc = await db.collection('ingredients').doc(id).get();
+    return { id: doc.id, ...doc.data() } as Ingredient;
   }
 
   async deleteIngredient(id: string): Promise<void> {
-    await db.delete(ingredients).where(eq(ingredients.id, id));
+    await db.collection('ingredients').doc(id).delete();
   }
 
   async deleteIngredientsByRecipe(recipeId: string): Promise<void> {
-    await db.delete(ingredients).where(eq(ingredients.recipeId, recipeId));
+    const snapshot = await db.collection('ingredients').where('recipeId', '==', recipeId).get();
+    const batch = db.batch();
+    snapshot.docs.forEach(doc => batch.delete(doc.ref));
+    await batch.commit();
   }
 
   // Favorites
   async toggleFavorite(userId: string, recipeId: string): Promise<{ isFavorited: boolean }> {
-    const [existing] = await db
-      .select()
-      .from(favorites)
-      .where(and(eq(favorites.userId, userId), eq(favorites.recipeId, recipeId)));
-
-    if (existing) {
-      await db.delete(favorites).where(eq(favorites.id, existing.id));
+    const snapshot = await db.collection('favorites').where('userId', '==', userId).where('recipeId', '==', recipeId).get();
+    if (!snapshot.empty) {
+      const doc = snapshot.docs[0];
+      await doc.ref.delete();
       return { isFavorited: false };
     } else {
-      await db.insert(favorites).values({ userId, recipeId });
+      const id = crypto.randomUUID();
+      await db.collection('favorites').doc(id).set({ userId, recipeId });
       return { isFavorited: true };
     }
   }
 
   async getFavoriteCount(recipeId: string): Promise<number> {
-    const result = await db
-      .select({ count: drizzleSql<number>`count(*)::int` })
-      .from(favorites)
-      .where(eq(favorites.recipeId, recipeId));
-    return result[0]?.count || 0;
+    const snapshot = await db.collection('favorites').where('recipeId', '==', recipeId).get();
+    return snapshot.size;
   }
 
   // Sharing
   async shareRecipe(recipeId: string, email: string): Promise<SharedRecipe> {
-    const [shared] = await db.insert(sharedRecipes).values({ recipeId, sharedWithEmail: email }).returning();
-    return shared;
+    const id = crypto.randomUUID();
+    await db.collection('sharedRecipes').doc(id).set({ recipeId, sharedWithEmail: email });
+    return { id, recipeId, sharedWithEmail: email } as SharedRecipe;
   }
 
   // Photos
   async createRecipePhoto(photo: InsertRecipePhoto): Promise<RecipePhoto> {
-    const [newPhoto] = await db.insert(recipePhotos).values(photo).returning();
-    return newPhoto;
+    const id = crypto.randomUUID();
+    await db.collection('recipePhotos').doc(id).set(photo);
+    return { id, ...photo } as RecipePhoto;
   }
 
   async deleteRecipePhoto(id: string): Promise<void> {
-    await db.delete(recipePhotos).where(eq(recipePhotos.id, id));
+    await db.collection('recipePhotos').doc(id).delete();
   }
 }
 
-export const storage = new DrizzleStorage();
+export const storage = new FirestoreStorage();

@@ -1,6 +1,6 @@
-import { drizzle } from "drizzle-orm/neon-http";
-import { neon } from "@neondatabase/serverless";
-import * as schema from "@shared/schema";
+import admin from 'firebase-admin';
+import { initFirebaseAdminFromEnv } from './firebaseAdmin.js';
 
-const sql = neon(process.env.DATABASE_URL!);
-export const db = drizzle(sql, { schema });
+initFirebaseAdminFromEnv();
+
+export const db = admin.firestore();
