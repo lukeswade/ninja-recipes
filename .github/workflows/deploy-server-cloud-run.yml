@@ -1,0 +1,117 @@
+name: Deploy server to Cloud Run
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+
+jobs:
+  deploy:
+    name: Deploy server to Cloud Run
+    runs-on: ubuntu-latest
+    env:
+      PROJECT_ID: ${{ secrets.VITE_FIREBASE_PROJECT_ID }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Authenticate with Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: '${{ secrets.FIREBASE_SERVICE_ACCOUNT }}'
+
+      - name: Set up gcloud CLI
+        uses: google-github-actions/setup-gcloud@v1
+        with:
+          project_id: ${{ secrets.VITE_FIREBASE_PROJECT_ID }}
+
+      - name: Install Node.js and build server
+        run: |
+          npm ci
+          npm run build
+
+      - name: Deploy to Cloud Run (source build)
+        run: |
+          # Deploy using Cloud Build (gcloud will create a container from the source)
+          gcloud run deploy ninja-recipes-server \
+            --source . \
+            --region us-central1 \
+            --project "$PROJECT_ID" \
+            --platform managed \
+            --allow-unauthenticated \
+            --port 5001
+        shell: bash
+
+      - name: Get Cloud Run service URL
+        id: get_url
+        run: |
+          SERVICE_URL=$(gcloud run services describe ninja-recipes-server --region us-central1 --project "$PROJECT_ID" --format='value(status.url)')
+          echo "service_url=$SERVICE_URL" >> $GITHUB_OUTPUT
+
+      - name: Update Cloudflare Pages env var VITE_API_URL (optional)
+        if: env.CLOUDFLARE_API_TOKEN != '' && env.CLOUDFLARE_ACCOUNT_ID != ''
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          PAGES_PROJECT: "ninja-recipes"
+          SERVICE_URL: ${{ steps.get_url.outputs.service_url }}
+        run: |
+          set -euo pipefail
+          echo "Setting VITE_API_URL to $SERVICE_URL on Cloudflare Pages project $PAGES_PROJECT"
+
+          # Construct candidate API endpoints. Cloudflare Pages API paths vary; try a couple of reasonable endpoints.
+          API_ENDPOINTS=(
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/pages/projects/${PAGES_PROJECT}/environment/variables"
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/pages/projects/${PAGES_PROJECT}/variables"
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/pages/projects/${PAGES_PROJECT}/env/vars"
+          )
+
+          # Build payload without jq to avoid dependency on jq in runner image
+          PAYLOAD="{\"variables\":[{\"name\":\"VITE_API_URL\",\"value\":\"$SERVICE_URL\",\"type\":\"plaintext\"}]}"
+
+          attempt=1
+          max_attempts=3
+          success=0
+          for endpoint in "${API_ENDPOINTS[@]}"; do
+            echo "Trying endpoint: $endpoint"
+            while [ $attempt -le $max_attempts ]; do
+              echo "Attempt $attempt -> $endpoint"
+              # capture both status and body for debugging
+              RESPONSE=$(curl -s -w "\nHTTP_STATUS:%{http_code}" -X PATCH "$endpoint" \
+                -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+                -H "Content-Type: application/json" \
+                --data "$PAYLOAD" || true)
+
+              HTTP_STATUS=$(echo "$RESPONSE" | sed -n 's/.*HTTP_STATUS:\([0-9]*\)$/\1/p' || true)
+              BODY=$(echo "$RESPONSE" | sed '/HTTP_STATUS:/d')
+
+              echo "Response status: ${HTTP_STATUS:-unknown}"
+              echo "Response body:" 
+              echo "$BODY"
+
+              if [ "${HTTP_STATUS:-0}" -ge 200 ] && [ "${HTTP_STATUS:-0}" -lt 300 ]; then
+                echo "Successfully updated Cloudflare Pages env var using $endpoint"
+                success=1
+                break 2
+              fi
+
+              attempt=$((attempt + 1))
+              sleep 2
+            done
+            # reset attempt counter for next endpoint
+            attempt=1
+          done
+
+          if [ "$success" -ne 1 ]; then
+            echo "Failed to update Cloudflare Pages environment variable. Please set VITE_API_URL manually in the Pages UI: https://dash.cloudflare.com/ -> Pages -> ninja-recipes -> Settings -> Environment variables"
+            exit 0
+          fi
+
+      - name: Deploy static client to Cloudflare Pages (optional)
+        if: env.CLOUDFLARE_API_TOKEN != '' && env.CLOUDFLARE_ACCOUNT_ID != ''
+        uses: cloudflare/pages-action@v1
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          projectName: "ninja-recipes"
+          directory: "dist/public"
