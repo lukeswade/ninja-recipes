@@ -3,18 +3,18 @@ import { initializeApp } from "firebase/app";
 import { getAuth } from "firebase/auth";
 import { getStorage } from "firebase/storage";
 
-// Your web app's Firebase configuration
+// Read Firebase config from environment variables so builds can provide different values per environment
 const firebaseConfig = {
-  apiKey: "AIzaSyAFeceeN7B5KnXcUgvYrj9kTJ5YSbR8qCI",
-  authDomain: "studio-4344422468-c2966.firebaseapp.com",
-  projectId: "studio-4344422468-c2966",
-  storageBucket: "studio-4344422468-c2966.firebasestorage.app",
-  messagingSenderId: "530084788593",
-  appId: "1:530084788593:web:2ece7ec1431270f2635ed0"
+  apiKey: (import.meta as any).env.VITE_FIREBASE_API_KEY,
+  authDomain: (import.meta as any).env.VITE_FIREBASE_AUTH_DOMAIN,
+  projectId: (import.meta as any).env.VITE_FIREBASE_PROJECT_ID,
+  storageBucket: (import.meta as any).env.VITE_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: (import.meta as any).env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+  appId: (import.meta as any).env.VITE_FIREBASE_APP_ID,
 };
 
 // Initialize Firebase
-const app = initializeApp(firebaseConfig);
+const app = initializeApp(firebaseConfig as any);
 
 // Initialize Firebase services
 export const auth = getAuth(app);
