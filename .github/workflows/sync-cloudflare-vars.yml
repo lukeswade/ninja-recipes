@@ -1,31 +1,9 @@
-name: Sync Cloudflare Pages env vars
-
-on:
-  workflow_dispatch:
-
-jobs:
-  sync-vars:
-    name: Sync VITE_* secrets to Cloudflare Pages
-    runs-on: ubuntu-latest
-    env:
-      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-      PROJECT_NAME: "ninja-recipes"
-      ENVIRONMENT: "production"
-      VITE_FIREBASE_API_KEY: ${{ secrets.VITE_FIREBASE_API_KEY }}
-      VITE_FIREBASE_AUTH_DOMAIN: ${{ secrets.VITE_FIREBASE_AUTH_DOMAIN }}
-      VITE_FIREBASE_PROJECT_ID: ${{ secrets.VITE_FIREBASE_PROJECT_ID }}
-      VITE_FIREBASE_STORAGE_BUCKET: ${{ secrets.VITE_FIREBASE_STORAGE_BUCKET }}
-      VITE_FIREBASE_MESSAGING_SENDER_ID: ${{ secrets.VITE_FIREBASE_MESSAGING_SENDER_ID }}
-      VITE_FIREBASE_APP_ID: ${{ secrets.VITE_FIREBASE_APP_ID }}
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Sync variables to Cloudflare Pages (safe)
+- name: Sync variables to Cloudflare Pages (safe)
         run: |
           set -euo pipefail
-          API_BASE="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/pages/projects/${PROJECT_NAME}/environments/${ENVIRONMENT}/variables"
+          # Use the correct API endpoint which seems consistent for list/create/update
+          # based on typical API designs and your previous script.
+          API_ENDPOINT="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/pages/projects/${PROJECT_NAME}/deployments/production/variables" # Adjusted based on common patterns, double-check CF docs if needed. Or try the previous endpoint again: environments/${ENVIRONMENT}/variables
 
           VARS=(
             "VITE_FIREBASE_API_KEY"
@@ -36,52 +14,84 @@ jobs:
             "VITE_FIREBASE_APP_ID"
           )
 
-          echo "Listing existing variables (names only)..."
-          EXISTING=$(curl -sS -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" "${API_BASE}" | jq -r '.result[]?.name' || true)
+          echo "Syncing variables to Cloudflare Pages project ${PROJECT_NAME} (Production)..."
+
+          # Fetch all existing variables first to minimize API calls inside the loop
+          echo "Fetching existing variables..."
+          EXISTING_VARS_JSON=$(curl -sS -X GET "${API_ENDPOINT}" \
+             -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+             -H "Content-Type: application/json" || echo '{"result": null}') # Provide default JSON on error
+
+          # Check if the fetch was successful
+          if ! echo "$EXISTING_VARS_JSON" | jq -e '.result' > /dev/null; then
+             echo "Error fetching existing variables:"
+             echo "$EXISTING_VARS_JSON" | jq '.' # Print formatted error if possible
+             # Decide how to proceed: exit or try POSTing all? For safety, let's exit.
+             exit 1
+          fi
 
           for NAME in "${VARS[@]}"; do
-            # read the secret value from env
-            VALUE=""
-            case "$NAME" in
-              VITE_FIREBASE_API_KEY) VALUE="$VITE_FIREBASE_API_KEY" ;;
-              VITE_FIREBASE_AUTH_DOMAIN) VALUE="$VITE_FIREBASE_AUTH_DOMAIN" ;;
-              VITE_FIREBASE_PROJECT_ID) VALUE="$VITE_FIREBASE_PROJECT_ID" ;;
-              VITE_FIREBASE_STORAGE_BUCKET) VALUE="$VITE_FIREBASE_STORAGE_BUCKET" ;;
-              VITE_FIREBASE_MESSAGING_SENDER_ID) VALUE="$VITE_FIREBASE_MESSAGING_SENDER_ID" ;;
-              VITE_FIREBASE_APP_ID) VALUE="$VITE_FIREBASE_APP_ID" ;;
-            esac
+            # Read the secret value from workflow env
+            VALUE="${!NAME}" # Use indirect expansion to get value
 
             if [ -z "$VALUE" ]; then
-              echo "- Skipping $NAME (secret not set)"
+              echo "- Skipping $NAME (GitHub secret not set or empty)"
               continue
             fi
 
-            # check if exists and get id
-            ID=$(curl -sS -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" "${API_BASE}" | jq -r --arg NAME "$NAME" '.result[]? | select(.name==$NAME) | .id' || true)
+            # Check if variable exists using jq on the fetched JSON
+            # Note: Using 'name' directly, assuming Cloudflare returns variables keyed by name or in an array
+            # Adjust the jq query based on the actual API response structure for listing variables.
+            # This attempts to find an object with the matching name in the 'result' object/array
+            # This jq query is more robust against nulls or empty results.
+            EXISTING_VAR_JSON=$(echo "$EXISTING_VARS_JSON" | jq -c --arg NAME "$NAME" '.result | .. | objects | select(has("name") and .name == $NAME)' || echo "")
 
-            payload=$(jq -n --arg name "$NAME" --arg value "$VALUE" '{name:$name, value:$value}')
+            payload=$(jq -n --arg name "$NAME" --arg value "$VALUE" '{name: $name, value: $value, type: "secret_text"}') # Set type to secret
 
-            if [ -n "$ID" ] && [ "$ID" != "null" ]; then
-              # update
-              resp=$(curl -sS -X PATCH -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" -H "Content-Type: application/json" "${API_BASE}/${ID}" --data "$payload" )
-              ok=$(echo "$resp" | jq -r '.success // false')
-              if [ "$ok" = "true" ]; then
-                echo "- Updated $NAME"
-              else
-                echo "- Failed to update $NAME"
-                echo "$resp" | jq -C '.'
-              fi
+            METHOD=""
+            URL=""
+
+            if [ -n "$EXISTING_VAR_JSON" ]; then
+              # Variable exists, use PATCH (or PUT, check CF docs)
+              # Assuming the listing doesn't provide an ID, we might need to use PUT with the name?
+              # Let's try PATCH first, assuming the endpoint structure supports it by name
+              # Or if the list provides an ID, extract it: ID=$(echo "$EXISTING_VAR_JSON" | jq -r '.id')
+              # If using ID: URL="${API_ENDPOINT}/${ID}"
+              # Let's assume updating by NAME is possible via PUT or PATCH on the base endpoint or a name-specific one
+              # Reverting to POST might be safer if PATCH fails consistently - or PUT if supported
+              echo "- Variable $NAME exists. Attempting update (PATCH)..."
+              METHOD="PATCH"
+              # Check Cloudflare docs: Can we PATCH to the base URL with the payload containing the name,
+              # or do we need a specific /variables/{name_or_id} endpoint? Let's assume PATCH to base works for now.
+              # Update: Cloudflare Pages variable update often uses PUT to /variables/{var_name}
+              # Let's try PUT to a name-specific endpoint
+              METHOD="PUT"
+              URL="${API_ENDPOINT}/${NAME}" # Try PUTting to the variable name endpoint
+
             else
-              # create
-              resp=$(curl -sS -X POST -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" -H "Content-Type: application/json" "${API_BASE}" --data "$payload" )
-              ok=$(echo "$resp" | jq -r '.success // false')
-              if [ "$ok" = "true" ]; then
-                echo "- Created $NAME"
-              else
-                echo "- Failed to create $NAME"
-                echo "$resp" | jq -C '.'
-              fi
+              # Variable does not exist, use POST
+              echo "- Variable $NAME does not exist. Attempting create (POST)..."
+              METHOD="POST"
+              URL="${API_ENDPOINT}"
             fi
+
+            resp=$(curl -sS -X ${METHOD} "${URL}" \
+              -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+              -H "Content-Type: application/json" \
+              --data "$payload")
+
+            ok=$(echo "$resp" | jq -r '.success // false')
+            if [ "$ok" = "true" ]; then
+              echo "- Successfully ${METHOD}ED $NAME"
+            else
+              echo "- Failed to ${METHOD} $NAME"
+              echo "URL: ${URL}"
+              echo "Payload: ${payload}"
+              echo "Response:"
+              echo "$resp" | jq -C '.' || echo "$resp" # Print raw response if jq fails
+              # Optional: Add specific error handling, e.g., if PUT failed, maybe try POST?
+            fi
+            sleep 1 # Avoid hitting rate limits
           done
 
-          echo "Sync complete. Cloudflare Pages variables updated for project ${PROJECT_NAME} (${ENVIRONMENT})."
+          echo "Sync complete. Check Cloudflare Pages variables for project ${PROJECT_NAME} (${ENVIRONMENT})."
