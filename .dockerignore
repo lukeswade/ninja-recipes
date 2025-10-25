@@ -1,0 +1,7 @@
+Dockerfile
+.dockerignore
+.git
+.gitignore
+npm-debug.log
+docs/
+attached_assets/

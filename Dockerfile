@@ -16,8 +16,9 @@ COPY . .
 # Build frontend and backend
 RUN npm run build
 
-# Expose port (Cloud Run will override, but good practice)
-EXPOSE 5001
+# Expose port and set it as an environment variable
+EXPOSE 8080
+ENV PORT 8080
 
-# Start the server
-CMD ["npm", "start"]
+# Start the server directly
+CMD ["node", "dist/index.js"]

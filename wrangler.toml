@@ -1,5 +1,0 @@
-name = "ninja-recipes"
-compatibility_date = "2025-10-24"
-# Tell Cloudflare Pages where the built static site is located
-pages_build_output_dir = "dist/public"
-
