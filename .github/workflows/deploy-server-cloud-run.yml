@@ -67,7 +67,7 @@ jobs:
           )
 
           # Build payload without jq to avoid dependency on jq in runner image
-          PAYLOAD="{\"variables\":[{\"name\":\"VITE_API_URL\",\"value\":\"$SERVICE_URL\",\"type\":\"plaintext\"}]}"
+          PAYLOAD='{"variables":[{"name":"VITE_API_URL","value":"'$SERVICE_URL'","type":"plaintext"}]}'
 
           attempt=1
           max_attempts=3
