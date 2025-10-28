@@ -1,1 +1,14 @@
 service-account-key.json
+node_modules
+
+# local environment and keys
+*.key
+*.json
+.env
+gha-deployer-key.json
+
+# macOS artifacts
+.DS_Store
+
+# helper scripts if you prefer not to commit them (optional)
+# create-gha-sa.sh
