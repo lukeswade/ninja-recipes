@@ -16,7 +16,15 @@
  */
 
 import { GetSignedUrlConfig, Storage } from '@google-cloud/storage';
-import { logger } from 'firebase-functions/v1';
+
+// Avoid depending on `firebase-functions` in the production server image.
+// Use a tiny console-based logger instead of importing from firebase-functions.
+const logger = {
+  info: (...args: any[]) => console.info(...args),
+  error: (...args: any[]) => console.error(...args),
+  warn: (...args: any[]) => console.warn(...args),
+  debug: (...args: any[]) => (console.debug ? console.debug(...args) : console.log(...args)),
+};
 
 // Note: had to manually set this in GCS, see:
 // https://cloud.google.com/storage/docs/configuring-cors#gcloud

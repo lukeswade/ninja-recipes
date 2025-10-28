@@ -1,5 +1,53 @@
+var __defProp = Object.defineProperty;
+var __getOwnPropNames = Object.getOwnPropertyNames;
+var __esm = (fn, res) => function __init() {
+  return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
+};
+var __export = (target, all) => {
+  for (var name in all)
+    __defProp(target, name, { get: all[name], enumerable: true });
+};
+
+// vite.config.ts
+var vite_config_exports = {};
+__export(vite_config_exports, {
+  default: () => vite_config_default
+});
+import { defineConfig } from "vite";
+import react from "@vitejs/plugin-react";
+import path from "path";
+var vite_config_default;
+var init_vite_config = __esm({
+  "vite.config.ts"() {
+    "use strict";
+    vite_config_default = defineConfig({
+      plugins: [
+        react()
+        // no replit-specific plugins
+      ],
+      resolve: {
+        alias: {
+          "@": path.resolve(import.meta.dirname, "client", "src"),
+          "@shared": path.resolve(import.meta.dirname, "shared"),
+          "@assets": path.resolve(import.meta.dirname, "attached_assets")
+        }
+      },
+      root: path.resolve(import.meta.dirname, "client"),
+      build: {
+        outDir: path.resolve(import.meta.dirname, "dist/public"),
+        emptyOutDir: true
+      },
+      server: {
+        fs: {
+          strict: true,
+          deny: ["**/.*"]
+        }
+      }
+    });
+  }
+});
+
 // server/index.ts
-import "dotenv/config";
 import express2 from "express";
 import session from "express-session";
 
@@ -45,8 +93,28 @@ async function verifyIdToken(idToken) {
 }
 
 // server/db.ts
-initFirebaseAdminFromEnv();
-var db = admin2.firestore();
+var _db = null;
+function ensureDb() {
+  if (_db) return _db;
+  try {
+    initFirebaseAdminFromEnv();
+    _db = admin2.firestore();
+    return _db;
+  } catch (err) {
+    return null;
+  }
+}
+var db = new Proxy({}, {
+  get(_target, prop) {
+    const real = ensureDb();
+    if (!real) {
+      throw new Error("Firebase Admin not initialized. Set FIREBASE_SERVICE_ACCOUNT or GOOGLE_APPLICATION_CREDENTIALS.");
+    }
+    const val = real[prop];
+    if (typeof val === "function") return val.bind(real);
+    return val;
+  }
+});
 
 // server/storage.ts
 var FirestoreStorage = class {
@@ -286,282 +354,51 @@ import bcrypt from "bcrypt";
 
 // server/objectStorage.ts
 import { Storage } from "@google-cloud/storage";
-import { randomUUID } from "crypto";
-
-// server/objectAcl.ts
-var ACL_POLICY_METADATA_KEY = "custom:aclPolicy";
-function isPermissionAllowed(requested, granted) {
-  if (requested === "read" /* READ */) {
-    return ["read" /* READ */, "write" /* WRITE */].includes(granted);
-  }
-  return granted === "write" /* WRITE */;
-}
-function createObjectAccessGroup(group) {
-  switch (group.type) {
-    default:
-      throw new Error(`Unknown access group type: ${group.type}`);
-  }
-}
-async function setObjectAclPolicy(objectFile, aclPolicy) {
-  const [exists] = await objectFile.exists();
-  if (!exists) {
-    throw new Error(`Object not found: ${objectFile.name}`);
-  }
-  await objectFile.setMetadata({
-    metadata: {
-      [ACL_POLICY_METADATA_KEY]: JSON.stringify(aclPolicy)
-    }
-  });
-}
-async function getObjectAclPolicy(objectFile) {
-  const [metadata] = await objectFile.getMetadata();
-  const aclPolicy = metadata?.metadata?.[ACL_POLICY_METADATA_KEY];
-  if (!aclPolicy) {
-    return null;
-  }
-  return JSON.parse(aclPolicy);
-}
-async function canAccessObject({
-  userId,
-  objectFile,
-  requestedPermission
-}) {
-  const aclPolicy = await getObjectAclPolicy(objectFile);
-  if (!aclPolicy) {
-    return false;
-  }
-  if (aclPolicy.visibility === "public" && requestedPermission === "read" /* READ */) {
-    return true;
-  }
-  if (!userId) {
-    return false;
-  }
-  if (aclPolicy.owner === userId) {
-    return true;
-  }
-  for (const rule of aclPolicy.aclRules || []) {
-    const accessGroup = createObjectAccessGroup(rule.group);
-    if (await accessGroup.hasMember(userId) && isPermissionAllowed(requestedPermission, rule.permission)) {
-      return true;
-    }
-  }
-  return false;
-}
-
-// server/objectStorage.ts
 var logger = {
   info: (...args) => console.info(...args),
   error: (...args) => console.error(...args),
   warn: (...args) => console.warn(...args),
   debug: (...args) => console.debug ? console.debug(...args) : console.log(...args)
 };
-var DEFAULT_BUCKET = process.env.GCLOUD_STORAGE_BUCKET ?? "ninja-recipes";
 var storage2 = null;
+var DEFAULT_BUCKET = process.env.STORAGE_BUCKET || "creamininja.appspot.com";
+var ObjectNotFoundError = class extends Error {
+  constructor(message) {
+    super(message);
+    this.name = "ObjectNotFoundError";
+  }
+};
 function getStorage() {
-  if (storage2) return storage2;
-  const svcJson = process.env.FIREBASE_SERVICE_ACCOUNT;
-  if (svcJson) {
-    try {
-      const svc = JSON.parse(svcJson);
-      storage2 = new Storage({ projectId: svc.project_id, credentials: svc });
-      logger.info("Initialized Google Cloud Storage with service account credentials");
-      return storage2;
-    } catch (err) {
-      logger.error("Failed to parse FIREBASE_SERVICE_ACCOUNT, falling back to default client", err);
-    }
+  if (storage2) {
+    return storage2;
   }
   storage2 = new Storage();
   logger.info("Using default Google Cloud Storage client");
   return storage2;
 }
-var ObjectNotFoundError = class _ObjectNotFoundError extends Error {
-  constructor() {
-    super("Object not found");
-    this.name = "ObjectNotFoundError";
-    Object.setPrototypeOf(this, _ObjectNotFoundError.prototype);
-  }
-};
-var ObjectStorageService = class {
-  constructor() {
-  }
-  getPublicObjectSearchPaths() {
-    const pathsStr = process.env.PUBLIC_OBJECT_SEARCH_PATHS || "";
-    const paths = Array.from(
-      new Set(
-        pathsStr.split(",").map((path3) => path3.trim()).filter((path3) => path3.length > 0)
-      )
-    );
-    if (paths.length === 0) {
-      throw new Error(
-        "PUBLIC_OBJECT_SEARCH_PATHS not set. Create a bucket in 'Object Storage' tool and set PUBLIC_OBJECT_SEARCH_PATHS env var (comma-separated paths)."
-      );
-    }
-    return paths;
-  }
-  getPrivateObjectDir() {
-    const dir = process.env.PRIVATE_OBJECT_DIR || "";
-    if (!dir) {
-      throw new Error(
-        "PRIVATE_OBJECT_DIR not set. Create a bucket in 'Object Storage' tool and set PRIVATE_OBJECT_DIR env var."
-      );
-    }
-    return dir;
-  }
-  async searchPublicObject(filePath) {
-    for (const searchPath of this.getPublicObjectSearchPaths()) {
-      const fullPath = `${searchPath}/${filePath}`;
-      const { bucketName, objectName } = parseObjectPath(fullPath);
-      const bucket = getStorage().bucket(bucketName);
-      const file = bucket.file(objectName);
-      const [exists] = await file.exists();
-      if (exists) {
-        return file;
-      }
-    }
-    return null;
-  }
-  async downloadObject(file, res, cacheTtlSec = 3600) {
-    try {
-      const [metadata] = await file.getMetadata();
-      const aclPolicy = await getObjectAclPolicy(file);
-      const isPublic = aclPolicy?.visibility === "public";
-      res.set({
-        "Content-Type": metadata.contentType || "application/octet-stream",
-        "Content-Length": metadata.size,
-        "Cache-Control": `${isPublic ? "public" : "private"}, max-age=${cacheTtlSec}`
-      });
-      const stream = file.createReadStream();
-      stream.on("error", (err) => {
-        console.error("Stream error:", err);
-        if (!res.headersSent) {
-          res.status(500).json({ error: "Error streaming file" });
-        }
-      });
-      stream.pipe(res);
-    } catch (error) {
-      console.error("Error downloading file:", error);
-      if (!res.headersSent) {
-        res.status(500).json({ error: "Error downloading file" });
-      }
-    }
-  }
-  async getObjectEntityUploadURL() {
-    const privateObjectDir = this.getPrivateObjectDir();
-    const objectId = randomUUID();
-    const fullPath = `${privateObjectDir}/uploads/${objectId}`;
-    const { bucketName, objectName } = parseObjectPath(fullPath);
-    return signObjectURL({
-      bucketName,
-      objectName,
-      method: "PUT",
-      ttlSec: 900
-    });
-  }
-  async getObjectEntityFile(objectPath) {
-    if (!objectPath.startsWith("/objects/")) {
-      throw new ObjectNotFoundError();
-    }
-    const parts = objectPath.slice(1).split("/");
-    if (parts.length < 2) {
-      throw new ObjectNotFoundError();
-    }
-    const entityId = parts.slice(1).join("/");
-    let entityDir = this.getPrivateObjectDir();
-    if (!entityDir.endsWith("/")) {
-      entityDir = `${entityDir}/`;
-    }
-    const objectEntityPath = `${entityDir}${entityId}`;
-    const { bucketName, objectName } = parseObjectPath(objectEntityPath);
-    const bucket = getStorage().bucket(bucketName);
-    const objectFile = bucket.file(objectName);
-    const [exists] = await objectFile.exists();
-    if (!exists) {
-      throw new ObjectNotFoundError();
-    }
-    return objectFile;
-  }
-  normalizeObjectEntityPath(rawPath) {
-    if (!rawPath.startsWith("https://storage.googleapis.com/")) {
-      return rawPath;
-    }
-    const url = new URL(rawPath);
-    const rawObjectPath = url.pathname;
-    let objectEntityDir = this.getPrivateObjectDir();
-    if (!objectEntityDir.startsWith("/")) {
-      objectEntityDir = `/${objectEntityDir}`;
-    }
-    if (!objectEntityDir.endsWith("/")) {
-      objectEntityDir = `${objectEntityDir}/`;
-    }
-    if (!rawObjectPath.startsWith(objectEntityDir)) {
-      return rawObjectPath;
-    }
-    const entityId = rawObjectPath.slice(objectEntityDir.length);
-    return `/objects/${entityId}`;
-  }
-  async trySetObjectEntityAclPolicy(rawPath, aclPolicy) {
-    const normalizedPath = this.normalizeObjectEntityPath(rawPath);
-    if (!normalizedPath.startsWith("/")) {
-      return normalizedPath;
-    }
-    const objectFile = await this.getObjectEntityFile(normalizedPath);
-    await setObjectAclPolicy(objectFile, aclPolicy);
-    return normalizedPath;
-  }
-  async canAccessObjectEntity({
-    userId,
-    objectFile,
-    requestedPermission
-  }) {
-    return canAccessObject({
-      userId,
-      objectFile,
-      requestedPermission: requestedPermission ?? "read" /* READ */
-    });
-  }
-};
-function parseObjectPath(path3) {
-  if (!path3.startsWith("/")) {
-    path3 = `/${path3}`;
-  }
-  const pathParts = path3.split("/");
-  if (pathParts.length < 3) {
-    throw new Error("Invalid path: must contain at least a bucket name");
-  }
-  const bucketName = pathParts[1];
-  const objectName = pathParts.slice(2).join("/");
-  return {
-    bucketName,
-    objectName
+function getBucketName() {
+  return DEFAULT_BUCKET;
+}
+async function generateV4ReadSignedUrl(objectName) {
+  const bucketName = getBucketName();
+  const client = getStorage();
+  const options = {
+    version: "v4",
+    action: "read",
+    expires: Date.now() + 15 * 60 * 1e3
+    // 15 minutes
   };
-}
-async function signObjectURL({
-  bucketName,
-  objectName,
-  method,
-  ttlSec
-}) {
-  const svcJson = process.env.FIREBASE_SERVICE_ACCOUNT;
-  if (svcJson) {
-    try {
-      const storage3 = getStorage();
-      const bucket = storage3.bucket(bucketName);
-      const file = bucket.file(objectName);
-      const action = method === "GET" ? "read" : method === "PUT" ? "write" : "delete";
-      const [url] = await file.getSignedUrl({
-        version: "v4",
-        action,
-        expires: Date.now() + ttlSec * 1e3
-      });
-      return url;
-    } catch (err) {
-      logger.error("Failed to generate GCS signed URL, falling back to sidecar", err);
-    }
+  try {
+    const [url] = await client.bucket(bucketName).file(objectName).getSignedUrl(options);
+    return url;
+  } catch (err) {
+    logger.error(`Failed to generate signed URL for object: ${objectName}`, err);
+    throw err;
   }
-  throw new Error(
-    "FIREBASE_SERVICE_ACCOUNT not set or signing failed. Set FIREBASE_SERVICE_ACCOUNT to a service account JSON to enable GCS signed URLs."
-  );
 }
+var ObjectStorageService = {
+  generateV4ReadSignedUrl
+};
 
 // server/routes.ts
 async function registerRoutes(app2) {
@@ -848,40 +685,8 @@ async function registerRoutes(app2) {
 import express from "express";
 import fs from "fs";
 import path2 from "path";
-import { createServer as createViteServer, createLogger } from "vite";
-
-// vite.config.ts
-import { defineConfig } from "vite";
-import react from "@vitejs/plugin-react";
-import path from "path";
-var vite_config_default = defineConfig({
-  plugins: [
-    react()
-    // no replit-specific plugins
-  ],
-  resolve: {
-    alias: {
-      "@": path.resolve(import.meta.dirname, "client", "src"),
-      "@shared": path.resolve(import.meta.dirname, "shared"),
-      "@assets": path.resolve(import.meta.dirname, "attached_assets")
-    }
-  },
-  root: path.resolve(import.meta.dirname, "client"),
-  build: {
-    outDir: path.resolve(import.meta.dirname, "dist/public"),
-    emptyOutDir: true
-  },
-  server: {
-    fs: {
-      strict: true,
-      deny: ["**/.*"]
-    }
-  }
-});
-
-// server/vite.ts
 import { nanoid } from "nanoid";
-var viteLogger = createLogger();
+var viteLogger = null;
 function log(message, source = "express") {
   const formattedTime = (/* @__PURE__ */ new Date()).toLocaleTimeString("en-US", {
     hour: "numeric",
@@ -892,13 +697,18 @@ function log(message, source = "express") {
   console.log(`${formattedTime} [${source}] ${message}`);
 }
 async function setupVite(app2, server) {
+  const [{ createServer: createViteServer, createLogger }, viteConfig] = await Promise.all([
+    import("vite"),
+    Promise.resolve().then(() => (init_vite_config(), vite_config_exports))
+  ]);
+  viteLogger = createLogger();
   const serverOptions = {
     middlewareMode: true,
     hmr: { server },
     allowedHosts: true
   };
   const vite = await createViteServer({
-    ...vite_config_default,
+    ...viteConfig && viteConfig.default || viteConfig,
     configFile: false,
     customLogger: {
       ...viteLogger,

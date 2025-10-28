@@ -5,7 +5,6 @@ import path from "path";
 // required in production without having 'vite' installed (it's a dev-only
 // dependency). We do dynamic imports inside setupVite below.
 import { type Server } from "http";
-import viteConfig from "../vite.config";
 import { nanoid } from "nanoid";
 
 let viteLogger: any = null;
