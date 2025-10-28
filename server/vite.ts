@@ -1,12 +1,14 @@
 import express, { type Express } from "express";
 import fs from "fs";
 import path from "path";
-import { createServer as createViteServer, createLogger } from "vite";
+// Defer importing 'vite' until setupVite is called so this module can be
+// required in production without having 'vite' installed (it's a dev-only
+// dependency). We do dynamic imports inside setupVite below.
 import { type Server } from "http";
 import viteConfig from "../vite.config";
 import { nanoid } from "nanoid";
 
-const viteLogger = createLogger();
+let viteLogger: any = null;
 
 export function log(message: string, source = "express") {
   const formattedTime = new Date().toLocaleTimeString("en-US", {
@@ -20,6 +22,16 @@ export function log(message: string, source = "express") {
 }
 
 export async function setupVite(app: Express, server: Server) {
+  // Dynamic import so production images (which don't have `vite` installed)
+  // can still import this file without failing. Only in development will
+  // setupVite be called, and then we'll import the dev-only deps.
+  const [{ createServer: createViteServer, createLogger }, viteConfig] = await Promise.all([
+    import('vite'),
+    import('../vite.config') as Promise<any>,
+  ]);
+
+  viteLogger = createLogger();
+
   const serverOptions = {
     middlewareMode: true,
     hmr: { server },
@@ -27,39 +39,39 @@ export async function setupVite(app: Express, server: Server) {
   };
 
   const vite = await createViteServer({
-    ...viteConfig,
+    ...((viteConfig && (viteConfig as any).default) || viteConfig),
     configFile: false,
     customLogger: {
       ...viteLogger,
-      error: (msg, options) => {
+      error: (msg: any, options: any) => {
         viteLogger.error(msg, options);
         process.exit(1);
       },
     },
     server: serverOptions,
-    appType: "custom",
+    appType: 'custom',
   });
 
   app.use(vite.middlewares);
-  app.use("*", async (req, res, next) => {
+  app.use('*', async (req, res, next) => {
     const url = req.originalUrl;
 
     try {
       const clientTemplate = path.resolve(
         import.meta.dirname,
-        "..",
-        "client",
-        "index.html",
+        '..',
+        'client',
+        'index.html',
       );
 
       // always reload the index.html file from disk incase it changes
-      let template = await fs.promises.readFile(clientTemplate, "utf-8");
+      let template = await fs.promises.readFile(clientTemplate, 'utf-8');
       template = template.replace(
         `src="/src/main.tsx"`,
         `src="/src/main.tsx?v=${nanoid()}"`,
       );
       const page = await vite.transformIndexHtml(url, template);
-      res.status(200).set({ "Content-Type": "text/html" }).end(page);
+      res.status(200).set({ 'Content-Type': 'text/html' }).end(page);
     } catch (e) {
       vite.ssrFixStacktrace(e as Error);
       next(e);
